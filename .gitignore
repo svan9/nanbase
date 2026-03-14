@@ -1,0 +1,13 @@
+build
+shaders
+.vscode
+commit.ps1
+nan-language
+old
+concepts
+"mirror-repository"
+nanasm/node_modules
+preprop
+libzip
+build-win/
+./todo.md

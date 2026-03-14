@@ -1,0 +1,5 @@
+import "hellow"
+
+entry:
+	jmp hellow
+	ret
