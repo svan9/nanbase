@@ -4,6 +4,14 @@ A custom bytecode assembler and virtual machine written in C++.
 Write assembly in `.ns` files, compile to `.nb` bytecode, run with the VM.
 
 ---
+## Platform support
+
+| Platform | Status |
+|---|---|
+| Windows | ✅ Tested |
+| Linux | ⚠️ Not tested |
+| macOS | ⚠️ Not tested |
+---
 
 ## Getting started
 
@@ -22,21 +30,6 @@ nanasm <path/to/file.ns> -rn
 nanvm <path/to/file.nb>
 ```
 
----
-
-## Project structure
-
-```
-nanbase/
-├── asm/          # Assembler (nanasm)
-│   └── main.cpp
-├── vm/           # Virtual machine (nanvm)
-│   ├── main.cpp
-│   └── virtual.hpp
-└── mewlib/       # Core library (types, memory, stack, IO)
-```
-
----
 
 ## Assembly syntax
 
