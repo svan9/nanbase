@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(RELEASE 0)
+# set(RELEASE 0)
 add_compile_definitions("DEBUG=$<CONFIG:Debug>")
 
 set(CMAKE_CXX_FLAGS_RELEASE "-Ofast")
