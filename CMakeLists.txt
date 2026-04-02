@@ -15,9 +15,9 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 add_subdirectory(vm)
 add_subdirectory(asm)
 
-add_custom_target(copy_bin ALL
-	COMMAND ${CMAKE_COMMAND} -E copy_directory
-	${CMAKE_BINARY_DIR}/bin ${CMAKE_BINARY_DIR}/../build-win
-	COMMENT "Copying bin folder to build-win"
-)
+# add_custom_target(copy_bin ALL
+# 	COMMAND ${CMAKE_COMMAND} -E copy_directory
+# 	${CMAKE_BINARY_DIR}/bin ${CMAKE_BINARY_DIR}/../build-win
+# 	COMMENT "Copying bin folder to build-win"
+# )
 
