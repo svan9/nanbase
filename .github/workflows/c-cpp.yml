@@ -1,0 +1,48 @@
+name: Build nanasm/nanvm
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-windows-mingw:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-make
+
+      - name: Configure CMake
+        shell: msys2 {0}
+        run: |
+          cmake -S . -B build \
+            -G "MinGW Makefiles" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=gcc \
+            -DCMAKE_CXX_COMPILER=g++
+
+      - name: Build
+        shell: msys2 {0}
+        run: |
+          cmake --build build --config Release -j 4
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nanasm-nanvm-windows-mingw32
+          path: |
+            build/**/*.exe
+            build/**/*.dll
+          if-no-files-found: warn
