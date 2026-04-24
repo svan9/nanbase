@@ -7,7 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # add_compile_options(-fconcepts)
 add_compile_options(-fpermissive)
 
-include_directories("./" "../vm")
+include_directories("./" "../vm" "../asm")
 
 add_executable("nanasm" main.cpp)
 target_link_options("nanasm" PUBLIC -static-libgcc -static-libstdc++ -O3 -static)

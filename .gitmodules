@@ -5,6 +5,3 @@
 	path = zlib
 	url = https://github.com/madler/zlib.git
 
-[submodule "vm"]
-	path = vm
-	url = https://github.com/svan9/nanvm

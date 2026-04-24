@@ -281,6 +281,6 @@ Requires CMake and Clang (ucrt64) or GCC (mingw64).
 
 ```sh
 cmake -S . -B build -G "MinGW Makefiles" \
-  -DCMAKE_CXX_COMPILER=clang++
+  -DCMAKE_CXX_COMPILER=GCC
 cmake --build build
 ```
