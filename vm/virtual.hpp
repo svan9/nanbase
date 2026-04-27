@@ -2449,6 +2449,14 @@ inline void JIT_Call(VirtualMachine& vm, u64 fn_offset, JIT_Cache& cache) {
       w.getBuilder().getBuilder_raw_push(rb, 3);
     }
 
+    void xor4vm(Waze& w) {
+      byte* rb = w.pop();
+      byte* ra = w.pop();
+      w.getBuilder() << Instruction_XOR;
+      w.getBuilder().getBuilder_raw_push(ra, 3);
+      w.getBuilder().getBuilder_raw_push(rb, 3);
+    }
+
     // ─── файлы ────────────────────────────────────────────────
 
     void wine4vm(Waze& w) {

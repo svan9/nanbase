@@ -15,6 +15,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 add_subdirectory(vm)
 add_subdirectory(asm)
 add_subdirectory(code_gen)
+add_subdirectory(waze)
 
 # add_custom_target(copy_bin ALL
 # 	COMMAND ${CMAKE_COMMAND} -E copy_directory
