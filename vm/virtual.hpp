@@ -413,7 +413,7 @@ namespace Virtual {
   vm_dll_pipe_fn VM_GetDllPipeFunction(VirtualMachine& vm, u64 dll_idx, const char* name) {
     auto it = vm.dll_pipes.find(name);
     if (it != vm.dll_pipes.end()) {return it->second;}
-    MewForUserAssert(vm.dll_handles.has(dll_idx), "cant find library by identifier(%i), maybe library wasnt loaded", dll_idx);
+    MewForUserAssert(vm.dll_handles.has_idx(dll_idx), "cant find library by identifier(%i), maybe library wasnt loaded", dll_idx);
 #ifdef _WIN32
     FARPROC proc = GetProcAddress(vm.dll_handles[dll_idx], name);
 #else
