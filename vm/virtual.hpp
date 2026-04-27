@@ -123,7 +123,7 @@ namespace Virtual {
 
   };
 
-  #define VIRTUAL_VERSION (Instruction_PUTS*100)+0x57
+  #define VIRTUAL_VERSION (Instruction_PUTS*100)+0x55
   #define GrabFromVM(var) memcpy(&var, vm.begin, sizeof(var)); vm.begin += sizeof(var);
 
   struct VM_MANIFEST_FLAGS {
