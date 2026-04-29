@@ -379,6 +379,14 @@ namespace nanasm {
             cb.putU64(0);
           } break;
 #pragma endregion POP
+          case TokenType::LEA: {
+            cb << Virtual::Instruction_LEA;
+            tk = Next();
+            PutArg(tk);
+            tk = Next();
+            if (tk.type == TokenType::COMMA) tk = Next(); 
+            PutArg(tk);
+          } break;
 #pragma region MATH
           case TokenType::ADD: {
             cb << Virtual::Instruction_ADD;

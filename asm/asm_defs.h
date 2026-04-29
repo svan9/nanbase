@@ -22,7 +22,7 @@ namespace nanasm {
     ADD, SUB, MUL, DIV, INC, DEC, NOT, XOR, OR, AND, LS, RS,
     JMP, RET, EXIT, TEST, JE, JEL, JEM, JNE, JL, JM, MOV, SWAP, MSET,
     PUTC, PUTI, PUTS, GETCH,
-    WINE, OPEN, WRITE, READ, CLOSE, IMPORT,
+    WINE, OPEN, WRITE, READ, CLOSE, IMPORT, LEA,
   };
 
 static std::unordered_map<const char *, TokenType> token_semantic = {
@@ -95,7 +95,7 @@ static std::unordered_map<const char *, TokenType> token_semantic = {
     {"read", TokenType::READ},
     {"close", TokenType::CLOSE},
     {"import", TokenType::IMPORT},
-
+    {"lea", TokenType::LEA},
   };
 
   struct DataValue {
