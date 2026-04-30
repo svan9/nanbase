@@ -30,6 +30,9 @@ jobs:
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-make
 
+      - name: Install NSIS
+        run: choco install nsis
+
       - name: Configure CMake
         shell: msys2 {0}
         run: |
@@ -44,6 +47,11 @@ jobs:
         run: |
           cmake --build build --config Release -j 4
 
+      - name: Create Installer
+        shell: msys2 {0}
+        run: |
+          cpack -G NSIS
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -51,13 +59,14 @@ jobs:
           path: |
             build/bin/*.exe
             build/bin/*.dll
+            build/*.exe
           if-no-files-found: warn
 
       - name: Create Release
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "build/bin/*.exe,build/bin/*.dll"
+          artifacts: "build/bin/*.exe,build/bin/*.dll,build/*.exe"
           generateReleaseNotes: true
           tag: "build-${{ github.run_number }}"
           name: "Build ${{ github.run_number }}"

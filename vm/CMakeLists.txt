@@ -19,7 +19,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC "./")
 set_target_properties(${PROJECT_NAME} PROPERTIES COMMON_LANGUAGE_RUNTIME "")
 find_package(OpenMP)
 
-target_link_libraries(${PROJECT_NAME} PUBLIC -static-libgcc -static-libstdc++ -O3 -static -pthread)
+target_link_libraries(${PROJECT_NAME} PUBLIC mewlib -O3 -pthread)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_compile_definitions(${PROJECT_NAME} PUBLIC "LINUX_OS")

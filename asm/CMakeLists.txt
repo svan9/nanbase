@@ -10,5 +10,8 @@ add_compile_options(-fpermissive)
 include_directories("./" "../vm" "../asm")
 
 add_executable("nanasm" main.cpp)
-target_link_options("nanasm" PUBLIC -static-libgcc -static-libstdc++ -O3 -static)
+target_link_libraries("nanasm" PUBLIC mewlib)
+target_link_options("nanasm" PUBLIC -O3)
 # set_target_properties("nanasm" PROPERTIES VS_DEBUGGER_COMMAND_ARGUMENTS "D:/so2u/GITHUB/cuba/nan/nanbase/test-asm/test.ns")
+
+install(TARGETS "nanasm")

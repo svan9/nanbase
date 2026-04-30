@@ -20,5 +20,7 @@ add_executable(${PROJECT_NAME} "main.cpp")
 target_include_directories(${PROJECT_NAME} PUBLIC "./")
 
 
-target_link_libraries(${PROJECT_NAME} PUBLIC -static-libgcc -static-libstdc++ -O3 -static -pthread)
+target_link_libraries(${PROJECT_NAME} PUBLIC mewlib -O3 -pthread)
+
+install(TARGETS ${PROJECT_NAME})
 
