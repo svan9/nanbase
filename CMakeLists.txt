@@ -14,7 +14,7 @@ add_subdirectory(vm)
 add_subdirectory(asm)
 add_subdirectory(code_gen)
 add_subdirectory(waze)
-add_subdirectory(nan_compiler)
+# add_subdirectory(nan_compiler)
 
 # Настройки CPack для создания инсталлятора
 set(CPACK_PACKAGE_NAME "NanBase")
