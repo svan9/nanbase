@@ -3,3 +3,5 @@ build
 libzip
 build-win/
 ./todo.md
+nan/
+nan_compiler/

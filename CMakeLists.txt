@@ -9,13 +9,12 @@ include_directories("${CMAKE_SOURCE_DIR}/vm")
 
 add_subdirectory(mewlib)
 
-
-
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 add_subdirectory(vm)
 add_subdirectory(asm)
 add_subdirectory(code_gen)
 add_subdirectory(waze)
+add_subdirectory(nan_compiler)
 
 # Настройки CPack для создания инсталлятора
 set(CPACK_PACKAGE_NAME "NanBase")

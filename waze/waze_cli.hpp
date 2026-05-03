@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "virtual.hpp"
+#include "code_gen.hpp"
 
 namespace waze_cli {
 
@@ -399,6 +400,27 @@ void run_repl() {
         printf("  done\n");
         printf("  time: %lld ms (%lld us)\n", ms, mcs);
 
+      } catch (std::exception& e) {
+        printf("  error: %s\n", e.what());
+      }
+      continue;
+    }
+
+    if (cmd == "build-exe") {
+      try {
+        Code* code = build_from_history(history);
+        const char* output_file = tok.size() > 1 ? tok[1].c_str() : "output.exe";
+        Virtual::SaveNativeExecutable(*code, output_file);
+      } catch (std::exception& e) {
+        printf("  error: %s\n", e.what());
+      }
+      continue;
+    }
+
+    if (cmd == "disasm") {
+      try {
+
+        printf("  executable 'output.exe' generated successfully\n");
       } catch (std::exception& e) {
         printf("  error: %s\n", e.what());
       }

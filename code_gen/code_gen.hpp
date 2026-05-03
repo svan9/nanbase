@@ -1,10 +1,11 @@
 #ifndef CODE_GEN_HPP
 #define CODE_GEN_HPP
 
+#include <set>
+
 #include "asm.hpp"
 #include "virtual.hpp"
 #include "x86_64.hpp"
-#include <set>
 
 namespace Virtual {
 
@@ -73,10 +74,6 @@ class NativeCompiler {
       all_positions.insert(pos);
 
       Instruction inst = (Instruction)*ptr++;
-
-      if (inst == Instruction_NONE) {
-        continue;
-      }
 
       size_t inst_size = get_instruction_size(inst, ptr - 1);
       ptr += inst_size;
@@ -181,7 +178,7 @@ class NativeCompiler {
       case Instruction_JM:
       case Instruction_JEL:
       case Instruction_JEM:
-        return 1 + 8;  // opcode + u64 address
+        return 8;  // opcode + u64 address
       case Instruction_RET:
       case Instruction_EXIT:
         return 0;
@@ -247,70 +244,281 @@ class NativeCompiler {
  public:
   NativeCompiler() {}
 
-  x86_64_CodeGen& compile(Code* code) {
-    src = code;
-    cg = x86_64_CodeGen();
-
-    printf("\n[NativeCompiler] Starting compilation\n");
-    printf("[NativeCompiler] Code capacity: %llu bytes\n", src->capacity);
-
-    // Сканируем все позиции
-    scan_all_positions();
-    scan_jump_targets();
-
-    // Создаем ВСЕ возможные метки заранее
-    printf("[NativeCompiler] Creating %zu labels\n", all_positions.size());
-    for (u64 pos : all_positions) {
-      std::string label = make_label(pos);
-      // Не вызываем cg.label() здесь, так как метки должны быть в порядке кода
-    }
-
-    // Пролог
-    cg.label("_native_entry");
-    cg.prologue();
+  void do_compile(x86_64_CodeGen& gen) {
+    gen.label("_native_entry");
+    gen.push_r64(Reg::RBP);
+    gen.mov_r64_r64(Reg::RBP, Reg::RSP);
+    gen.push_r64(Reg::RBX);  // сохраняем RBX
+    gen.push_r64(Reg::R12);  // сохраняем R12-R15 если используем
+    gen.push_r64(Reg::R13);
+    gen.push_r64(Reg::R14);
+    gen.push_r64(Reg::R15);
 
 #ifdef PLATFORM_WINDOWS
-    cg.mov_r64_r64(Reg::RBX, Reg::RCX);
+    gen.mov_r64_r64(Reg::RBX, Reg::RCX);  // vm* приходит в RCX
 #else
-    cg.mov_r64_r64(Reg::RBX, Reg::RDI);
+    gen.mov_r64_r64(Reg::RBX, Reg::RDI);  // vm* приходит в RDI
 #endif
+    gen.mov_r64_r64(Reg::RBX, Reg::RCX);
 
-    // Генерируем код
     byte* vm_code = (byte*)src->playground;
-    byte* end = vm_code + src->capacity;
     byte* ptr = vm_code;
+    byte* end = vm_code + src->capacity;
 
     while (ptr < end) {
       u64 pos = ptr - vm_code;
-
-      // Создаем метку для текущей позиции
-      std::string label_name = make_label(pos);
-      cg.label(label_name);
+      gen.label(make_label(pos));
 
       Instruction inst = (Instruction)*ptr++;
+      size_t op_size = get_instruction_size(inst, ptr);  // размер операндов
 
-      if (inst == Instruction_NONE) {
-        continue;
-      }
+      if (inst != Instruction_NONE)
+        compile_instruction_gen(gen, inst, ptr);
 
-      // printf("[NativeCompiler] Compiling %d at 0x%llX\n", inst, pos);
-
-      compile_instruction(inst, ptr);
-
-      size_t inst_size = get_instruction_size(inst, ptr - 1);
-      ptr += inst_size;
+      ptr += op_size;  // ← ВАЖНО: пропускаем операнды
     }
 
-    // Метка для выхода (на случай если EXIT не сгенерировал переход)
-    cg.label("_native_exit");
-    cg.xor_r64_r64(Reg::RAX, Reg::RAX);
-    cg.epilogue();
-    cg.ret();
+    gen.label("_native_exit");
+    gen.pop_r64(Reg::R15);  // восстанавливаем
+    gen.pop_r64(Reg::R14);
+    gen.pop_r64(Reg::R13);
+    gen.pop_r64(Reg::R12);
+    gen.pop_r64(Reg::RBX);
+    gen.leave();
+    gen.ret();
+  }
 
-    printf("[NativeCompiler] Finalizing...\n");
+  void compile_instruction_gen(x86_64_CodeGen& gen, Instruction inst, byte* ops) {
+    switch (inst) {
+      case Instruction_JMP: {
+        u64 target;
+        memcpy(&target, ops, 8);
+        gen.jmp(make_label(target));
+      } break;
+      case Instruction_CALL: {
+        u64 target;
+        memcpy(&target, ops, 8);
+        gen.call(make_label(target));
+      } break;
+      case Instruction_JE: {
+        u64 t;
+        memcpy(&t, ops, 8);
+        gen.je(make_label(t));
+      } break;
+      case Instruction_JNE: {
+        u64 t;
+        memcpy(&t, ops, 8);
+        gen.jne(make_label(t));
+      } break;
+      case Instruction_JL: {
+        u64 t;
+        memcpy(&t, ops, 8);
+        gen.jl(make_label(t));
+      } break;
+      case Instruction_JM: {
+        u64 t;
+        memcpy(&t, ops, 8);
+        gen.jg(make_label(t));
+      } break;
+      case Instruction_JEL: {
+        u64 t;
+        memcpy(&t, ops, 8);
+        gen.jle(make_label(t));
+      } break;
+      case Instruction_JEM: {
+        u64 t;
+        memcpy(&t, ops, 8);
+        gen.jge(make_label(t));
+      } break;
+      case Instruction_RET:
+      case Instruction_EXIT:
+        gen.jmp("_native_exit");
+        break;
+      case Instruction_ADD:
+        gen.pop_r64(Reg::RCX);
+        gen.pop_r64(Reg::RAX);
+        gen.add_r64_r64(Reg::RAX, Reg::RCX);
+        gen.push_r64(Reg::RAX);
+        break;
+      case Instruction_SUB:
+        gen.pop_r64(Reg::RCX);
+        gen.pop_r64(Reg::RAX);
+        gen.sub_r64_r64(Reg::RAX, Reg::RCX);
+        gen.push_r64(Reg::RAX);
+        break;
+      case Instruction_TEST:
+        gen.pop_r64(Reg::RCX);
+        gen.pop_r64(Reg::RAX);
+        gen.cmp_r64_r64(Reg::RAX, Reg::RCX);
+        break;
+      case Instruction_POP:
+        gen.add_r64_imm32(Reg::RSP, 8);
+        break;
+      case Instruction_PUSH:
+        compile_push_gen(gen, ops);
+        break;
+      case Instruction_RPOP:
+        compile_rpop_gen(gen, ops);
+        break;
+      case Instruction_PUTS: {
+        // PUTS <offset:u64> — печатает строку из heap+offset
+        u64 data_offset = 0;
+        memcpy(&data_offset, ops, sizeof(u64));
+
+        // Загружаем vm->heap
+        int32_t heap_off = (int32_t)offsetof(VirtualMachine, heap);
+        gen.mov_r64_mem(Reg::RCX, Reg::RBX, heap_off);  // rcx = vm->heap
+
+        // rcx = heap + data_offset
+        gen.mov_r64_imm64(Reg::RAX, data_offset);
+        gen.add_r64_r64(Reg::RCX, Reg::RAX);  // rcx = &string
+
+        // sub rsp, 32 (shadow space Windows)
+        gen.sub_r64_imm32(Reg::RSP, 32);
+
+        // call puts(rcx)
+        gen.mov_r64_imm64(Reg::RAX, (uint64_t)&puts);
+        gen.call_r64(Reg::RAX);
+
+        // add rsp, 32
+        gen.add_r64_imm32(Reg::RSP, 32);
+      } break;
+      default:
+        gen.nop();
+        break;
+    }
+  }
+
+  void compile_push_gen(x86_64_CodeGen& gen, byte* ops) {
+    byte type = *ops++;
+    switch (type) {
+      case Instruction_NUM: {
+        u32 val;
+        memcpy(&val, ops, 4);
+        gen.pushi32(static_cast<int32_t>(val));
+      } break;
+
+      case Instruction_BYTE: {
+        u8 val = *ops;
+        gen.pushi32(static_cast<int32_t>(val));
+      } break;
+
+      case Instruction_REG: {
+        byte rtype = *ops++;
+        byte idx = *ops;
+        switch ((VM_RegType)rtype) {
+          case VM_RegType::R: {
+            // R регистры — 32-bit, лежат в памяти VirtualMachine._r[idx].data
+            // RBX = &vm — загружаем из структуры
+            // offsetof(_r[idx]) = offsetof(VirtualMachine, _r) + idx * 4
+            // Но проще: держим vm* в RBX, загружаем через смещение
+            int32_t off = (int32_t)(offsetof(VirtualMachine, _r) + idx * sizeof(VM_Register<4>));
+            gen.mov_r64_mem(Reg::RAX, Reg::RBX, off);
+            gen.push_r64(Reg::RAX);
+          } break;
+          case VM_RegType::RX: {
+            int32_t off = (int32_t)(offsetof(VirtualMachine, _rx) + idx * sizeof(VM_Register<8>));
+            gen.mov_r64_mem(Reg::RAX, Reg::RBX, off);
+            gen.push_r64(Reg::RAX);
+          } break;
+          case VM_RegType::FX: {
+            int32_t off = (int32_t)(offsetof(VirtualMachine, _fx) + idx * sizeof(VM_Register<4>));
+            gen.mov_r64_mem(Reg::RAX, Reg::RBX, off);
+            gen.push_r64(Reg::RAX);
+          } break;
+          case VM_RegType::DX: {
+            int32_t off = (int32_t)(offsetof(VirtualMachine, _dx) + idx * sizeof(VM_Register<8>));
+            gen.mov_r64_mem(Reg::RAX, Reg::RBX, off);
+            gen.push_r64(Reg::RAX);
+          } break;
+          case VM_RegType::RDI: {
+            int32_t off = (int32_t)offsetof(VirtualMachine, rdi);
+            gen.mov_r64_mem(Reg::RAX, Reg::RBX, off);
+            gen.push_r64(Reg::RAX);
+          } break;
+          default:
+            gen.pushi32(0);
+            break;
+        }
+      } break;
+
+      case Instruction_MEM: {
+        // MEM <offset:u64> <size:u64>
+        // heap + offset → push value
+        u64 offset = 0;
+        memcpy(&offset, ops, sizeof(u64));
+        // загружаем vm->heap
+        int32_t heap_off = (int32_t)offsetof(VirtualMachine, heap);
+        gen.mov_r64_mem(Reg::RAX, Reg::RBX, heap_off);  // rax = vm->heap
+        gen.mov_r64_imm64(Reg::RCX, offset);
+        gen.add_r64_r64(Reg::RAX, Reg::RCX);     // rax = heap + offset
+        gen.mov_r64_mem(Reg::RAX, Reg::RAX, 0);  // rax = *rax
+        gen.push_r64(Reg::RAX);
+      } break;
+
+      default:
+        gen.pushi32(0);
+        break;
+    }
+  }
+
+  void compile_rpop_gen(x86_64_CodeGen& gen, byte* ops) {
+    byte type = *ops++;
+    if (type != Instruction_REG) {
+      // просто выбрасываем верхний элемент
+      gen.pop_r64(Reg::RAX);
+      return;
+    }
+
+    byte rtype = *ops++;
+    byte idx = *ops;
+
+    // pop значение со стека в rax
+    gen.pop_r64(Reg::RAX);
+
+    switch ((VM_RegType)rtype) {
+      case VM_RegType::R: {
+        int32_t off = (int32_t)(offsetof(VirtualMachine, _r) + idx * sizeof(VM_Register<4>));
+        gen.mov_mem_r64(Reg::RBX, off, Reg::RAX);
+      } break;
+      case VM_RegType::RX: {
+        int32_t off = (int32_t)(offsetof(VirtualMachine, _rx) + idx * sizeof(VM_Register<8>));
+        gen.mov_mem_r64(Reg::RBX, off, Reg::RAX);
+      } break;
+      case VM_RegType::FX: {
+        int32_t off = (int32_t)(offsetof(VirtualMachine, _fx) + idx * sizeof(VM_Register<4>));
+        gen.mov_mem_r64(Reg::RBX, off, Reg::RAX);
+      } break;
+      case VM_RegType::DX: {
+        int32_t off = (int32_t)(offsetof(VirtualMachine, _dx) + idx * sizeof(VM_Register<8>));
+        gen.mov_mem_r64(Reg::RBX, off, Reg::RAX);
+      } break;
+      case VM_RegType::RDI: {
+        int32_t off = (int32_t)offsetof(VirtualMachine, rdi);
+        gen.mov_mem_r64(Reg::RBX, off, Reg::RAX);
+      } break;
+      default:
+        break;
+    }
+  }
+
+  x86_64_CodeGen& compile(Code* code) {
+    src = code;
+    scan_all_positions();
+    scan_jump_targets();
+
+    // Проход 1 — полная компиляция
+    // jmp на forward-refs попадут в unresolved_jumps
+    x86_64_CodeGen pass1;
+    do_compile(pass1);
+
+    // После do_compile все label() уже вызваны —
+    // все метки определены в pass1.labels
+    // Теперь просто финализируем pass1
+    // (finalize резолвит unresolved_jumps по pass1.labels)
+
+    cg = std::move(pass1);
     cg.finalize();
-    printf("[NativeCompiler] Done!\n");
-
     return cg;
   }
 
