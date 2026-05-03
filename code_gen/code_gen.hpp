@@ -4,6 +4,7 @@
 #include <set>
 
 #include "asm.hpp"
+#include "exut.hpp"
 #include "virtual.hpp"
 #include "x86_64.hpp"
 
@@ -59,6 +60,35 @@ class NativeCompiler {
 
   std::string make_label(u64 offset) {
     return "L_" + std::to_string(offset);
+  }
+
+  u64 puts = 0;  // Адрес функции puts (для печати строк)
+
+  u64 find_func(const char* lib_name, const char* func_name) {
+#ifdef PLATFORM_WINDOWS
+    HMODULE hLib = LoadLibraryA(lib_name);
+    if (!hLib) {
+      printf("Failed to load library: %s\n", lib_name);
+      return 0;
+    }
+    FARPROC proc = GetProcAddress(hLib, func_name);
+    if (!proc) {
+      printf("Failed to find function: %s in %s\n", func_name, lib_name);
+      return 0;
+    }
+    return (u64)proc;
+#else
+#error "find_func not implemented for this platform"
+#endif
+  }
+
+  void scan_dll_functions() {
+    puts = find_func("msvcrt.dll", "puts");
+    if (puts) {
+      printf("[INFO] Found puts at 0x%llX\n", puts);
+    } else {
+      printf("[WARN] Failed to find puts function\n");
+    }
   }
 
   // Сканируем ВСЕ позиции инструкций
@@ -159,12 +189,13 @@ class NativeCompiler {
         }
         return sz;
       }
+      case Instruction_PUTS:
+        return 1 + 7;
       case Instruction_INC:
       case Instruction_DEC:
       case Instruction_NOT:
       case Instruction_PUTC:
       case Instruction_PUTI:
-      case Instruction_PUTS:
       case Instruction_GETCH:
       case Instruction_GBCH:
       case Instruction_SRDI:
@@ -181,7 +212,7 @@ class NativeCompiler {
         return 8;  // opcode + u64 address
       case Instruction_RET:
       case Instruction_EXIT:
-        return 0;
+        return 1;
       case Instruction_MSET:
         return 1 + 24;  // opcode + 3*u64
       case Instruction_OPEN:
@@ -225,19 +256,19 @@ class NativeCompiler {
     switch (type) {
       case Instruction_NUM:
       case Instruction_FLT:
-        return 1 + 4;
+        return 1 + 4;  // opcode + type + 4 bytes
       case Instruction_BYTE:
         return 1 + 1;
       case Instruction_REG:
         return 1 + 2;
       case Instruction_MEM:
-        return 1 + 4;
+        return 5;
       case Instruction_ST:
-        return 1 + 4;  // PUSH ST <offset>
+        return 5;  // PUSH ST <offset>
       case Instruction_STRUCT:
-        return 1 + 1 + 4;  // PUSH STRUCT <size>
+        return 1 + 4 + 1;  // PUSH STRUCT <size>
       default:
-        return 1;
+        return 2;
     }
   }
 
@@ -246,44 +277,78 @@ class NativeCompiler {
 
   void do_compile(x86_64_CodeGen& gen) {
     gen.label("_native_entry");
+
+    // Пролог
     gen.push_r64(Reg::RBP);
     gen.mov_r64_r64(Reg::RBP, Reg::RSP);
-    gen.push_r64(Reg::RBX);  // сохраняем RBX
-    gen.push_r64(Reg::R12);  // сохраняем R12-R15 если используем
+    gen.push_r64(Reg::RBX);
+    gen.push_r64(Reg::R12);
     gen.push_r64(Reg::R13);
     gen.push_r64(Reg::R14);
     gen.push_r64(Reg::R15);
+    gen.sub_r64_imm32(Reg::RSP, 8);  // alignment
 
+    // Сохраняем VM*
 #ifdef PLATFORM_WINDOWS
-    gen.mov_r64_r64(Reg::RBX, Reg::RCX);  // vm* приходит в RCX
-#else
-    gen.mov_r64_r64(Reg::RBX, Reg::RDI);  // vm* приходит в RDI
-#endif
     gen.mov_r64_r64(Reg::RBX, Reg::RCX);
+#else
+    gen.mov_r64_r64(Reg::RBX, Reg::RDI);
+#endif
 
     byte* vm_code = (byte*)src->playground;
     byte* ptr = vm_code;
     byte* end = vm_code + src->capacity;
 
+    printf("[COMPILE] Processing %lld bytes of VM code\n", (long long)(end - ptr));
+
+    // Пропускаем начальный JMP если есть
+    if (ptr < end) {
+      Instruction first = (Instruction)*ptr;
+      printf("[COMPILE] First byte: 0x%02X\n", (int)first);
+
+      if (first == Instruction_JMP) {
+        u64 target;
+        memcpy(&target, ptr + 1, 8);
+        printf("[COMPILE] JMP to 0x%llX\n", target);
+        if (target < src->capacity) {
+          ptr = vm_code + target;
+        }
+      }
+    }
+
+    int count = 0;
     while (ptr < end) {
       u64 pos = ptr - vm_code;
       gen.label(make_label(pos));
 
       Instruction inst = (Instruction)*ptr++;
-      size_t op_size = get_instruction_size(inst, ptr);  // размер операндов
+      size_t op_size = get_instruction_size(inst, ptr - 1);
 
-      if (inst != Instruction_NONE)
-        compile_instruction_gen(gen, inst, ptr);
+      printf("[%04llX] Inst=%d size=%zu\n", pos, (int)inst, op_size);
 
-      ptr += op_size;  // ← ВАЖНО: пропускаем операнды
+      compile_instruction_gen(gen, inst, ptr);
+
+      ptr += op_size;
+      count++;
     }
 
+    printf("[COMPILE] Total instructions: %d\n", count);
+
     gen.label("_native_exit");
-    gen.pop_r64(Reg::R15);  // восстанавливаем
-    gen.pop_r64(Reg::R14);
-    gen.pop_r64(Reg::R13);
-    gen.pop_r64(Reg::R12);
-    gen.pop_r64(Reg::RBX);
+
+    // Возвращаем результат через RAX (по соглашению x64)
+    // Если нужно вернуть значение из VM, загрузите его из R0
+    auto last = *(gen.code.end() - 1);
+    if (last != 0xC3 && last != 0xC9) {
+      gen.mov_r64_imm64(Reg::RAX, 0);  // exit code
+
+      gen.add_r64_imm32(Reg::RSP, 8);
+      gen.pop_r64(Reg::R15);
+      gen.pop_r64(Reg::R14);
+      gen.pop_r64(Reg::R13);
+      gen.pop_r64(Reg::R12);
+      gen.pop_r64(Reg::RBX);
+    }
     gen.leave();
     gen.ret();
   }
@@ -331,8 +396,11 @@ class NativeCompiler {
         gen.jge(make_label(t));
       } break;
       case Instruction_RET:
+        gen.pop_r64(Reg::RAX);
+        gen.ret();
+        break;
       case Instruction_EXIT:
-        gen.jmp("_native_exit");
+        gen.leave();
         break;
       case Instruction_ADD:
         gen.pop_r64(Reg::RCX);
@@ -360,30 +428,28 @@ class NativeCompiler {
       case Instruction_RPOP:
         compile_rpop_gen(gen, ops);
         break;
+        // В compile_instruction_gen или вашем коде VM:
+
       case Instruction_PUTS: {
-        // PUTS <offset:u64> — печатает строку из heap+offset
         u64 data_offset = 0;
         memcpy(&data_offset, ops, sizeof(u64));
 
-        // Загружаем vm->heap
-        int32_t heap_off = (int32_t)offsetof(VirtualMachine, heap);
-        gen.mov_r64_mem(Reg::RCX, Reg::RBX, heap_off);  // rcx = vm->heap
+        // Загружаем адрес строки в RCX (первый аргумент puts)
+        gen.mov_r64_imm64(Reg::RCX, 0x140003000ULL + data_offset);
 
-        // rcx = heap + data_offset
-        gen.mov_r64_imm64(Reg::RAX, data_offset);
-        gen.add_r64_r64(Reg::RCX, Reg::RAX);  // rcx = &string
-
-        // sub rsp, 32 (shadow space Windows)
+        // Резервируем shadow space (32 байта для Windows x64)
         gen.sub_r64_imm32(Reg::RSP, 32);
 
-        // call puts(rcx)
-        gen.mov_r64_imm64(Reg::RAX, (uint64_t)&puts);
-        gen.call_r64(Reg::RAX);
+        // Вызываем puts через IAT[3] = 0x140002018
+        gen.mov_r64_imm64(Reg::RAX, 0x14000206C);
+        gen.call_mem64(Reg::RAX);
 
-        // add rsp, 32
+        // Восстанавливаем стек
         gen.add_r64_imm32(Reg::RSP, 32);
       } break;
+
       default:
+        printf("[WARN] Unknown instruction: %d (0x%02X)\n", (int)inst, (int)inst);
         gen.nop();
         break;
     }
@@ -506,18 +572,13 @@ class NativeCompiler {
     src = code;
     scan_all_positions();
     scan_jump_targets();
+    scan_dll_functions();
 
-    // Проход 1 — полная компиляция
-    // jmp на forward-refs попадут в unresolved_jumps
     x86_64_CodeGen pass1;
     do_compile(pass1);
 
-    // После do_compile все label() уже вызваны —
-    // все метки определены в pass1.labels
-    // Теперь просто финализируем pass1
-    // (finalize резолвит unresolved_jumps по pass1.labels)
-
     cg = std::move(pass1);
+    cg.emit_data_bytes(src->data, src->data_size);
     cg.finalize();
     return cg;
   }
@@ -711,12 +772,31 @@ inline int ExecuteNative(Code& code) {
   return result;
 }
 
-// Save native executable to file
 inline void SaveNativeExecutable(Code& code, const std::string& filename) {
+  printf("Saving to: %s\n", filename.c_str());
+
   NativeCompiler compiler;
-  x86_64_CodeGen& cg = compiler.compile(&code);
-  cg.compile_to_file(filename);
+  x86_64_CodeGen cg = compiler.compile(&code);
+
+  if (cg.code.empty()) {
+    printf("ERROR: No code generated!\n");
+    return;
+  }
+
+  printf("Code bytes: %zu\n", cg.code.size());
+  printf("Code hex: ");
+  for (size_t i = 0; i < std::min(cg.code.size(), (size_t)16); i++) {
+    printf("%02X ", cg.code[i]);
+  }
+  printf("\n");
+
+#ifdef PLATFORM_WINDOWS
+  create_minimal_pe64(cg, filename);
+#else
+  create_minimal_elf64(cg, filename);
+#endif
 }
+
 }  // namespace Virtual
 
 namespace Tests {

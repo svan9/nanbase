@@ -1751,8 +1751,9 @@ inline void VM_Puts(VirtualMachine& vm) {
   vm.debug.last_fn = (char*)__func__;
   u64 offset;
   GrabFromVM(offset);
-  MewCriticalIf(!(vm.heap + offset < vm.end), "out of memory");
 
+  MewCriticalIf(!(vm.heap + offset < vm.end), "out of memory");
+  // MewCriticalIf(!(vm.heap + offset + length < vm.end), "out of memory");
   fputs((const char*)(vm.heap + offset), vm.std_out);
 }
 

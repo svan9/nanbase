@@ -6,8 +6,8 @@
 #include <string>
 #include <vector>
 
-#include "virtual.hpp"
 #include "code_gen.hpp"
+#include "virtual.hpp"
 
 namespace waze_cli {
 
@@ -263,12 +263,12 @@ Code* build_from_history(std::vector<HistoryEntry>& history) {
   waze::Waze tmp;
 
   bool has_entry = false;
-  bool has_exit  = false;
+  bool has_exit = false;
 
   for (auto& h : history) {
     auto t = tokenize(h.raw);
     if (!t.empty() && (t[0] == "putEntry" || t[0] == "entry")) has_entry = true;
-    if (!t.empty() && t[0] == "exit")                           has_exit  = true;
+    if (!t.empty() && t[0] == "exit") has_exit = true;
   }
 
   if (!has_entry) {
@@ -411,16 +411,6 @@ void run_repl() {
         Code* code = build_from_history(history);
         const char* output_file = tok.size() > 1 ? tok[1].c_str() : "output.exe";
         Virtual::SaveNativeExecutable(*code, output_file);
-      } catch (std::exception& e) {
-        printf("  error: %s\n", e.what());
-      }
-      continue;
-    }
-
-    if (cmd == "disasm") {
-      try {
-
-        printf("  executable 'output.exe' generated successfully\n");
       } catch (std::exception& e) {
         printf("  error: %s\n", e.what());
       }
@@ -644,14 +634,32 @@ void run_repl() {
               }
             } break;
 
-            case Instruction_NUM: {
-              if (i + 4 < sz) {
-                s32 num = 0;
-                memcpy(&num, bc + i + 1, sizeof(s32));
-                printf("  %d", num);
-                i += 4;
+            case Instruction_PUSH: {
+              u8 type = bc[i + 1];
+              switch (type) {
+                case Instruction_NUM: {
+                  printf("  NUM");
+                  u32 num = 0;
+                  if (i + 5 < sz) {
+                    memcpy(&num, bc + i + 2, sizeof(u32));
+                    printf("(%d)", num);
+                    i += 4;
+                  }
+                } break;
+
+                default: break;
               }
+              ++i;
             } break;
+
+              // case Instruction_NUM: {
+              //   if (i + 4 < sz) {
+              //     s32 num = 0;
+              //     memcpy(&num, bc + i + 1, sizeof(s32));
+              //     printf("  %d", num);
+              //     i += 4;
+              //   }
+              // } break;
 
             case Instruction_PUTC: {
               if (i + 2 < sz) {

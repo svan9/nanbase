@@ -95,6 +95,14 @@ struct x86_64_CodeGen {
     emit_byte((scale << 6) | ((index & 0x07) << 3) | (base & 0x07));
   }
 
+  void call_mem64(uint8_t base_reg) {
+    if (base_reg >= 8) {
+      emit_rex(false, false, false, true);
+    }
+    emit_byte(0xFF);
+    emit_modrm(0, 2, base_reg & 0x07);  // mod=0, reg=2 (call), rm=base
+  }
+
   // ============== Instructions ==============
 
   // Push 32-bit immediate
@@ -538,6 +546,7 @@ struct x86_64_CodeGen {
   // ============== Labels ==============
 
   void label(const std::string& name) {
+    if (labels.find(name) != labels.end()) {return;}
     labels[name] = code.size();
   }
 
@@ -760,6 +769,7 @@ struct x86_64_CodeGen {
     fclose(f);
     return cg;
   }
+
 };
 
 // ============== Convenience functions ==============
@@ -843,6 +853,7 @@ inline x86_64_CodeGen& exit(x86_64_CodeGen& cg, int32_t code) {
 
 // Register constants
 namespace Reg {
+
 constexpr uint8_t RAX = 0;
 constexpr uint8_t RCX = 1;
 constexpr uint8_t RDX = 2;
