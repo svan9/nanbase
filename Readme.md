@@ -13,7 +13,7 @@ Write assembly in `.ns` files, compile to `.nb` bytecode, run with the VM.
 | macOS | ⚠️ Not tested |
 
 
-### waze
+### waze-build
 | Platform | Status |
 |---|---|
 | Windows | ✅ Tested |
