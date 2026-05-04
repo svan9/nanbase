@@ -23,6 +23,12 @@
 #include <unistd.h>
 #endif
 
+struct Relocation {
+  std::string name;         // Имя функции (для отладки)
+  uint64_t code_offset;     // Смещение в коде, где нужен патч
+  uint64_t target_iat_rva;  // RVA цели в IAT (заполняется при сборке PE)
+};
+
 struct x86_64_CodeGen {
   std::vector<uint8_t> code;  // executable code section
   std::vector<uint8_t> data;  // static data section (read-only)
@@ -33,6 +39,9 @@ struct x86_64_CodeGen {
   std::vector<std::pair<std::string, size_t>> unresolved_jumps;
   std::vector<std::pair<std::string, size_t>> unresolved_calls;
   std::vector<std::pair<std::string, size_t>> unresolved_data_refs;
+
+  std::vector<Relocation> relocations;
+  std::unordered_map<std::string, uint64_t> iat_map;
 
   // Data label management
   std::unordered_map<std::string, size_t> data_labels;
@@ -48,6 +57,21 @@ struct x86_64_CodeGen {
   // Helper to emit bytes
   void emit_byte(uint8_t b) {
     code.push_back(b);
+  }
+
+  // Предзаполненный call [rip+0] — 6 байт (FF 15 00 00 00 00)
+  void call_iat_stub(const std::string& func_name) {
+    emit_byte(0xFF);                   // call r/m64
+    emit_byte(0x15);                   // ModRM: RIP-relative
+    uint64_t patch_pos = code.size();  // Где будет offset
+    emit_dword(0);                     // placeholder (будет заполнено при сборке PE)
+
+    relocations.push_back({func_name, patch_pos, 0});
+  }
+
+  // Сохранить IAT маппинг (заполняется в PE64Generator)
+  void set_iat_map(const std::unordered_map<std::string, uint64_t>& map) {
+    iat_map = map;
   }
 
   void emit_word(uint16_t w) {
@@ -101,6 +125,13 @@ struct x86_64_CodeGen {
     }
     emit_byte(0xFF);
     emit_modrm(0, 2, base_reg & 0x07);  // mod=0, reg=2 (call), rm=base
+  }
+
+  void call_qptr(uint64_t abs_addr) {  // call qword ptr [addr]
+    uint64_t rip_rel = abs_addr - (0x140000000ULL + 0x1000 + code.size() + 5);
+    emit_byte(0xFF);
+    emit_modrm(0, 2, 5);  // mod=0, reg=2 (call), rm=5 (disp32)
+    emit_dword(rip_rel & 0xFFFFFFFF);
   }
 
   // ============== Instructions ==============
@@ -546,7 +577,9 @@ struct x86_64_CodeGen {
   // ============== Labels ==============
 
   void label(const std::string& name) {
-    if (labels.find(name) != labels.end()) {return;}
+    if (labels.find(name) != labels.end()) {
+      return;
+    }
     labels[name] = code.size();
   }
 
@@ -769,7 +802,6 @@ struct x86_64_CodeGen {
     fclose(f);
     return cg;
   }
-
 };
 
 // ============== Convenience functions ==============

@@ -21,6 +21,7 @@ class PE64Generator {
   };
 
  private:
+  std::unordered_map<std::string, uint64_t> m_iatMap;
   std::vector<uint8_t> m_text;   // .text section
   std::vector<uint8_t> m_rdata;  // .rdata section
   std::vector<uint8_t> m_data;   // .data section
@@ -65,52 +66,181 @@ class PE64Generator {
     return (v + a - 1) & ~(a - 1);
   }
 
-  // Build complete .rdata with imports
-  // НОВАЯ СТРУКТУРА .rdata:
-  // 0x00-0x1F: IAT (32 нуля)
-  // 0x20-0x33: IDT
-  // 0x34-0x43: INT (сразу после IDT!)
-  // 0x60: DLL name
-  // 0x80,0x90,0xA0: Hint/Name
+  void resolveRelocations(x86_64_CodeGen* cg, uint32_t textRva) {
+    if (!cg) return;
 
-  void buildRdata() {
-    m_rdata.assign(512, 0);
-    if (m_imports.empty()) return;
+    constexpr uint32_t wrapperSize = 4;  // 48 83 EC 28
 
-    // ===== IDT[0]: KERNEL32.DLL (0x00) =====
-    patchU32(m_rdata, 0x00 + 0, 0);  // OriginalFirstThunk = 0!
-    patchU32(m_rdata, 0x00 + 4, 0);
-    patchU32(m_rdata, 0x00 + 8, 0);
-    patchU32(m_rdata, 0x00 + 12, 0x2091);  // Name → "KERNEL32.DLL"
-    patchU32(m_rdata, 0x00 + 16, 0x205C);  // FirstThunk → IAT
+    printf("[resolveRelocations] count = %zu\n", cg->relocations.size());
 
-    // ===== IDT[1]: ucrtbase.dll (0x14) =====
-    patchU32(m_rdata, 0x14 + 0, 0);  // OriginalFirstThunk = 0!
-    patchU32(m_rdata, 0x14 + 4, 0);
-    patchU32(m_rdata, 0x14 + 8, 0);
-    patchU32(m_rdata, 0x14 + 12, 0x209E);  // Name → "ucrtbase.dll"
-    patchU32(m_rdata, 0x14 + 16, 0x206C);  // FirstThunk → IAT
+    for (auto& reloc : cg->relocations) {
+      printf("[reloc] name=%s code_offset=0x%X\n",
+             reloc.name.c_str(),
+             reloc.code_offset);
 
-    // ===== INT + IAT =====
-    patchU64(m_rdata, 0x5C, 0);
-    patchU64(m_rdata, 0x6C, 0);
+      auto it = m_iatMap.find(reloc.name);
+      if (it == m_iatMap.end()) {
+        printf("  ERROR: IAT RVA not found for '%s'\n", reloc.name.c_str());
 
-    patchU64(m_rdata, 0x5C, 0x207C);
-    patchU64(m_rdata, 0x6C, 0x208A);
+        printf("  Available IAT names:\n");
+        for (auto& kv : m_iatMap) {
+          printf("    %s -> RVA 0x%llX\n",
+                 kv.first.c_str(),
+                 (unsigned long long)kv.second);
+        }
 
-    // Hint/Name ExitProcess (0x7C)
-    m_rdata[0x7C] = 0;
-    m_rdata[0x7D] = 0;
-    memcpy(&m_rdata[0x7E], "ExitProcess", 12);
+        continue;
+      }
 
-    // Hint/Name puts (0x8A)
-    m_rdata[0x8A] = 0;
-    m_rdata[0x8B] = 0;
-    memcpy(&m_rdata[0x8C], "puts", 5);
+      uint64_t iatRva = it->second;
+      uint64_t iatVa = IMAGE_BASE + iatRva;
 
-    // DLL names
-    memcpy(&m_rdata[0x91], "KERNEL32.DLL", 13);
-    memcpy(&m_rdata[0x9E], "ucrtbase.dll", 12);
+      /*
+          ВАЖНО:
+
+          reloc.code_offset должен указывать на disp32,
+          то есть на 4 нулевых байта после FF 15.
+
+          Если инструкция:
+
+              FF 15 00 00 00 00
+
+          и FF находится на offset X,
+          то disp32 находится на offset X + 2.
+      */
+
+      uint32_t dispOff = wrapperSize + reloc.code_offset;
+
+      if (dispOff + 4 > m_text.size()) {
+        printf("  ERROR: dispOff out of range: 0x%X, m_text.size=0x%zX\n",
+               dispOff,
+               m_text.size());
+        continue;
+      }
+
+      uint64_t rip = IMAGE_BASE + textRva + dispOff + 4;
+
+      int64_t diff = (int64_t)iatVa - (int64_t)rip;
+
+      if (diff < INT32_MIN || diff > INT32_MAX) {
+        printf("  ERROR: RIP displacement out of int32 range\n");
+        continue;
+      }
+
+      int32_t disp = (int32_t)diff;
+
+      printf("  IAT RVA = 0x%llX\n", (unsigned long long)iatRva);
+      printf("  IAT VA  = 0x%llX\n", (unsigned long long)iatVa);
+      printf("  RIP     = 0x%llX\n", (unsigned long long)rip);
+      printf("  DISP    = 0x%X (%d)\n", (uint32_t)disp, disp);
+      printf("  patch m_text[0x%X]\n", dispOff);
+
+      patchU32(m_text, dispOff, (uint32_t)disp);
+    }
+  }
+
+  uint32_t numDlls = 0;
+  uint32_t iatSize = 0;
+  uint32_t idtOff = 0;
+  uint32_t iatOff = 0;
+
+  void buildRdata(uint32_t rdataRva) {
+    m_iatMap.clear();
+    iatSize = 0;
+    numDlls = 0;
+
+    if (m_imports.empty()) {
+      m_rdata.assign(512, 0);
+      return;
+    }
+
+    numDlls = (uint32_t)m_imports.size();
+
+    // СЧИТАЕМ РАЗМЕРЫ
+    for (auto& dll : m_imports) {
+      iatSize += ((uint32_t)dll.functions.size() + 1) * 8;
+    }
+
+    uint32_t idtSize = (numDlls + 1) * 20;
+
+    uint32_t intSize = 0;
+    for (auto& dll : m_imports) {
+      intSize += ((uint32_t)dll.functions.size() + 1) * 8;
+    }
+
+    uint32_t hintNameSize = 0;
+    for (auto& dll : m_imports) {
+      for (auto& fn : dll.functions) {
+        hintNameSize += 2 + (uint32_t)fn.name.size() + 1;
+      }
+    }
+
+    uint32_t dllNamesSize = 0;
+    for (auto& dll : m_imports) {
+      dllNamesSize += (uint32_t)dll.dllName.size() + 1;
+    }
+
+    uint32_t totalSize = iatSize + idtSize + intSize + hintNameSize + dllNamesSize;
+    m_rdata.assign(totalSize, 0);
+
+    // ===== НОВЫЙ ПОРЯДОК: IDT → INT → IAT → Hint → DLL (как в рабочем!) =====
+    idtOff = 0;                                // IDT в начале
+    uint32_t intOff = idtOff + idtSize;        // INT после IDT
+    iatOff = intOff + intSize;                 // IAT после INT
+    uint32_t hintOff = iatOff + iatSize;       // Hint после IAT
+    uint32_t dllOff = hintOff + hintNameSize;  // DLL после Hint
+
+    printf("[RDATA] Offsets: IDT=0x%X INT=0x%X IAT=0x%X Hint=0x%X DLL=0x%X\n",
+           idtOff, intOff, iatOff, hintOff, dllOff);
+
+    uint32_t currentIdt = idtOff;
+    uint32_t currentInt = intOff;
+    uint32_t currentIat = iatOff;
+    uint32_t currentHint = hintOff;
+    uint32_t currentDll = dllOff;
+
+    for (uint32_t di = 0; di < numDlls; di++) {
+      auto& dll = m_imports[di];
+      uint32_t funcCount = (uint32_t)dll.functions.size();
+
+      // IDT запись
+      patchU32(m_rdata, currentIdt + 0, rdataRva + currentInt);  // OriginalFirstThunk → INT
+      patchU32(m_rdata, currentIdt + 4, 0);
+      patchU32(m_rdata, currentIdt + 8, 0);
+      patchU32(m_rdata, currentIdt + 12, rdataRva + currentDll);  // Name → DLL
+      patchU32(m_rdata, currentIdt + 16, rdataRva + currentIat);  // FirstThunk → IAT
+      currentIdt += 20;
+
+      for (uint32_t fi = 0; fi < funcCount; fi++) {
+        auto& fn = dll.functions[fi];
+
+        // Hint/Name
+        m_rdata[currentHint + 0] = fn.hint & 0xFF;
+        m_rdata[currentHint + 1] = (fn.hint >> 8) & 0xFF;
+        memcpy(&m_rdata[currentHint + 2], fn.name.c_str(), fn.name.size() + 1);
+
+        uint64_t hintNameRva = rdataRva + currentHint;
+
+        patchU64(m_rdata, currentInt, hintNameRva);  // INT / ILT
+        patchU64(m_rdata, currentIat, hintNameRva);  // IAT initial value
+
+        m_iatMap[fn.name] = rdataRva + currentIat;
+
+        currentIat += 8;
+        currentInt += 8;
+        currentHint += 2 + (uint32_t)fn.name.size() + 1;
+      }
+
+      // Терминаторы
+      patchU64(m_rdata, currentIat, 0);
+      patchU64(m_rdata, currentInt, 0);
+      currentIat += 8;
+      currentInt += 8;
+
+      // DLL name
+      memcpy(&m_rdata[currentDll], dll.dllName.c_str(), dll.dllName.size() + 1);
+      currentDll += (uint32_t)dll.dllName.size() + 1;
+    }
   }
 
   void writeHeaders(std::vector<uint8_t>& pe,
@@ -181,15 +311,17 @@ class PE64Generator {
       appendU32(pe, 0);
     }
 
-    size_t optBase = 64 + 4 + 20; 
-
     // Patch Import Directory (index 1)
-    patchU32(pe, optBase + 120, rdataRva + 0x00);  // Import RVA
-    patchU32(pe, optBase + 124, 60);               // Import Size
+    size_t optBase = 64 + 4 + 20;
+    if (numDlls > 0) {
+      uint32_t idtSize = (numDlls + 1) * 20;
 
-    // Patch IAT Directory (index 12)
-    patchU32(pe, optBase + 208, rdataRva + 0x5C);    // IAT RVA
-    patchU32(pe, optBase + 212, 48);        // Size = 48
+      patchU32(pe, optBase + 120, rdataRva + idtOff);
+      patchU32(pe, optBase + 124, idtSize);
+
+      patchU32(pe, optBase + 208, rdataRva + iatOff);
+      patchU32(pe, optBase + 212, iatSize);
+    }
 
     // Section Headers
     auto appendSection = [&](const char* name, uint32_t vs, uint32_t va,
@@ -208,9 +340,24 @@ class PE64Generator {
       appendU32(pe, chars);
     };
 
-    appendSection(".text", (uint32_t)m_text.size(), textRva, textSize, headersSize, 0x60000020);
-    appendSection(".idata", (uint32_t)m_rdata.size(), rdataRva, rdataSize, headersSize + textSize, 0x40000040);
-    appendSection(".data", (uint32_t)m_data.size(), dataRva, dataSize, headersSize + textSize + rdataSize, 0xC0000040);
+    appendSection(".text",
+                  (uint32_t)m_text.size(),
+                  textRva,
+                  textSize,
+                  headersSize,
+                  IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ);
+    appendSection(".idata",
+                  (uint32_t)m_rdata.size(),
+                  rdataRva,
+                  rdataSize,
+                  headersSize + textSize,
+                  IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE);
+    appendSection(".data",
+                  (uint32_t)m_data.size(),
+                  dataRva,
+                  dataSize,
+                  headersSize + textSize + rdataSize,
+                  IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE);
   }
 
  public:
@@ -238,76 +385,94 @@ class PE64Generator {
 
   // Generate wrapper that calls user code then exits
   void createWrapper() {
-    std::vector<uint8_t> wrapper(23);
+    std::vector<uint8_t> wrapper(4);
 
-    // sub rsp, 0x28
     wrapper[0] = 0x48;
     wrapper[1] = 0x83;
     wrapper[2] = 0xEC;
     wrapper[3] = 0x28;
-    // call user_code
-    wrapper[4] = 0xE8;
-    int32_t rel = 23 - 9;  // next instruction - call offset
-    *(int32_t*)&wrapper[5] = rel;
-    // xor ecx, ecx
-    wrapper[9] = 0x31;
-    wrapper[10] = 0xC9;
-    // mov rax, IAT[2] (ExitProcess)
-    wrapper[11] = 0x48;
-    wrapper[12] = 0xB8;
-    *(uint64_t*)&wrapper[13] = IMAGE_BASE + 0x2000 + 0x10;  // IAT[2]
-    // call [rax]
-    wrapper[21] = 0xFF;
-    wrapper[22] = 0x10;
 
-    // Prepend wrapper to code
     m_text.insert(m_text.begin(), wrapper.begin(), wrapper.end());
     m_entryRva = 0;
   }
 
   // Save to file
-  void save(const std::string& filename) {
-    buildRdata();
+  void save(const std::string& filename, x86_64_CodeGen* cg = nullptr) {
+    constexpr uint32_t NUM_SECTIONS = 3;
 
-    uint32_t textSize = alignUp((uint32_t)m_text.size(), FILE_ALIGN);
-    uint32_t rdataSize = alignUp((uint32_t)m_rdata.size(), FILE_ALIGN);
-    uint32_t dataSize = alignUp((uint32_t)m_data.size(), FILE_ALIGN);
-    uint32_t headersSize = alignUp(64 + 4 + 20 + 240 + 3 * 40, FILE_ALIGN);
-    uint32_t imageSize = alignUp(0x3000 + dataSize, SECT_ALIGN);
+    uint32_t headersSize = alignUp(
+        64 + 4 + 20 + 240 + NUM_SECTIONS * 40,
+        FILE_ALIGN);
 
-    uint32_t textRva = 0x1000;
-    uint32_t rdataRva = 0x2000;
-    uint32_t dataRva = 0x3000;
+    // Если передан codegen — сначала берём его код
+    if (cg) {
+      setCode(*cg);
+    }
+
+    // Добавляем wrapper ДО расчёта размеров и ДО relocation patch
+    createWrapper();
+
+    uint32_t textRva = alignUp(headersSize, SECT_ALIGN);
+
+    uint32_t textVirtualSize = (uint32_t)m_text.size();
+
+    uint32_t rdataRva = alignUp(textRva + textVirtualSize, SECT_ALIGN);
+
+    // buildRdata должен быть ДО resolveRelocations,
+    // потому что он заполняет m_iatMap
+    buildRdata(rdataRva);
+
+    uint32_t rdataVirtualSize = (uint32_t)m_rdata.size();
+
+    uint32_t dataRva = alignUp(rdataRva + rdataVirtualSize, SECT_ALIGN);
+
+    uint32_t dataVirtualSize = (uint32_t)m_data.size();
+
+    uint32_t textSize = alignUp(textVirtualSize, FILE_ALIGN);
+    uint32_t rdataSize = alignUp(rdataVirtualSize, FILE_ALIGN);
+    uint32_t dataSize = alignUp(dataVirtualSize, FILE_ALIGN);
+
+    uint32_t imageSize = alignUp(dataRva + dataVirtualSize, SECT_ALIGN);
+
+    // Теперь патчим уже финальный m_text
+    if (cg) {
+      resolveRelocations(cg, textRva);
+    }
 
     std::vector<uint8_t> pe;
-    writeHeaders(pe, textRva, rdataRva, dataRva,
-                 textSize, rdataSize, dataSize,
-                 headersSize, imageSize);
 
-    // Pad to headersSize
+    writeHeaders(
+        pe,
+        textRva,
+        rdataRva,
+        dataRva,
+        textSize,
+        rdataSize,
+        dataSize,
+        headersSize,
+        imageSize);
+
     while (pe.size() < headersSize) pe.push_back(0);
 
-    // .text section
     size_t textStart = pe.size();
     pe.insert(pe.end(), m_text.begin(), m_text.end());
     while (pe.size() < textStart + textSize) pe.push_back(0);
 
-    // .rdata section
     size_t rdataStart = pe.size();
     pe.insert(pe.end(), m_rdata.begin(), m_rdata.end());
     while (pe.size() < rdataStart + rdataSize) pe.push_back(0);
 
-    // .data section — ВАЖНО: данные должны быть на offset 0x600!
-    // Сейчас pe.size() должен быть равен headersSize + textSize + rdataSize
     size_t dataStart = pe.size();
     pe.insert(pe.end(), m_data.begin(), m_data.end());
     while (pe.size() < dataStart + dataSize) pe.push_back(0);
 
-    // Проверяем, что dataStart == headersSize + textSize + rdataSize
-    printf("Data section starts at: 0x%zX (expected 0x%X)\n",
-           dataStart, headersSize + textSize + rdataSize);
+    printf(".text  RVA=0x%X RAW=0x%zX VSIZE=0x%X RSIZE=0x%X\n",
+           textRva, textStart, textVirtualSize, textSize);
+    printf(".idata RVA=0x%X RAW=0x%zX VSIZE=0x%X RSIZE=0x%X\n",
+           rdataRva, rdataStart, rdataVirtualSize, rdataSize);
+    printf(".data  RVA=0x%X RAW=0x%zX VSIZE=0x%X RSIZE=0x%X\n",
+           dataRva, dataStart, dataVirtualSize, dataSize);
 
-    // Write file
     FILE* f = fopen(filename.c_str(), "wb");
     if (f) {
       fwrite(pe.data(), 1, pe.size(), f);
@@ -318,16 +483,19 @@ class PE64Generator {
   // Convenience: create minimal working EXE
   static void CreateExecutable(const std::vector<uint8_t>& vmCode,
                                const std::vector<uint8_t>& vmData,
-                               const std::string& filename) {
+                               const std::string& filename,
+                               x86_64_CodeGen* cg = nullptr) {
     PE64Generator gen;
-    gen.setCode(vmCode);
+    if (cg) {
+      gen.setCode(cg->code);
+    }
+    else {
+      gen.setCode(vmCode);
+    }
     gen.setData(vmData);
-    gen.addImport("KERNEL32.dll", "GetStdHandle");
-    gen.addImport("KERNEL32.dll", "WriteConsoleA");
-    gen.addImport("KERNEL32.dll", "ExitProcess");
-    gen.addImport("ucrt64.dll", "puts");
-    gen.createWrapper();
-    gen.save(filename);
+    gen.addImport("KERNEL32.DLL", "ExitProcess");
+    gen.addImport("msvcrt.dll", "puts");
+    gen.save(filename, cg);
   }
 };
 

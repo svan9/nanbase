@@ -57,6 +57,7 @@ class NativeCompiler {
   std::unordered_map<u64, std::string> jump_labels;
   std::set<u64> all_positions;  // Все позиции инструкций
   u64 current_offset = 0;
+  s64 stack_counter = 0;
 
   std::string make_label(u64 offset) {
     return "L_" + std::to_string(offset);
@@ -278,23 +279,6 @@ class NativeCompiler {
   void do_compile(x86_64_CodeGen& gen) {
     gen.label("_native_entry");
 
-    // Пролог
-    gen.push_r64(Reg::RBP);
-    gen.mov_r64_r64(Reg::RBP, Reg::RSP);
-    gen.push_r64(Reg::RBX);
-    gen.push_r64(Reg::R12);
-    gen.push_r64(Reg::R13);
-    gen.push_r64(Reg::R14);
-    gen.push_r64(Reg::R15);
-    gen.sub_r64_imm32(Reg::RSP, 8);  // alignment
-
-    // Сохраняем VM*
-#ifdef PLATFORM_WINDOWS
-    gen.mov_r64_r64(Reg::RBX, Reg::RCX);
-#else
-    gen.mov_r64_r64(Reg::RBX, Reg::RDI);
-#endif
-
     byte* vm_code = (byte*)src->playground;
     byte* ptr = vm_code;
     byte* end = vm_code + src->capacity;
@@ -334,23 +318,13 @@ class NativeCompiler {
 
     printf("[COMPILE] Total instructions: %d\n", count);
 
-    gen.label("_native_exit");
-
-    // Возвращаем результат через RAX (по соглашению x64)
-    // Если нужно вернуть значение из VM, загрузите его из R0
     auto last = *(gen.code.end() - 1);
     if (last != 0xC3 && last != 0xC9) {
-      gen.mov_r64_imm64(Reg::RAX, 0);  // exit code
-
-      gen.add_r64_imm32(Reg::RSP, 8);
-      gen.pop_r64(Reg::R15);
-      gen.pop_r64(Reg::R14);
-      gen.pop_r64(Reg::R13);
-      gen.pop_r64(Reg::R12);
-      gen.pop_r64(Reg::RBX);
+      gen.pop_r64(Reg::RCX);
+      gen.mov_r64_imm64(Reg::RAX, 0x14000205C);  // ExitProcess address
+      gen.call_mem64(Reg::RAX);
     }
-    gen.leave();
-    gen.ret();
+    // gen.leave();
   }
 
   void compile_instruction_gen(x86_64_CodeGen& gen, Instruction inst, byte* ops) {
@@ -396,10 +370,17 @@ class NativeCompiler {
         gen.jge(make_label(t));
       } break;
       case Instruction_RET:
-        gen.pop_r64(Reg::RAX);
         gen.ret();
         break;
       case Instruction_EXIT:
+        if (stack_counter > 0) { 
+          gen.pop_r64(Reg::RCX);
+        } else {
+          gen.xor_r64_r64(Reg::RCX, Reg::RCX);  // exit code 0
+        }
+        gen.call_iat_stub("ExitProcess");
+        // gen.mov_r64_imm64(Reg::RAX, 0x14000205C);  // ExitProcess address
+        // gen.call_mem64(Reg::RAX);
         gen.leave();
         break;
       case Instruction_ADD:
@@ -421,31 +402,25 @@ class NativeCompiler {
         break;
       case Instruction_POP:
         gen.add_r64_imm32(Reg::RSP, 8);
+        --stack_counter; 
         break;
       case Instruction_PUSH:
         compile_push_gen(gen, ops);
+        ++stack_counter; 
         break;
       case Instruction_RPOP:
         compile_rpop_gen(gen, ops);
+        --stack_counter; 
         break;
         // В compile_instruction_gen или вашем коде VM:
 
       case Instruction_PUTS: {
         u64 data_offset = 0;
         memcpy(&data_offset, ops, sizeof(u64));
-
-        // Загружаем адрес строки в RCX (первый аргумент puts)
         gen.mov_r64_imm64(Reg::RCX, 0x140003000ULL + data_offset);
-
-        // Резервируем shadow space (32 байта для Windows x64)
-        gen.sub_r64_imm32(Reg::RSP, 32);
-
-        // Вызываем puts через IAT[3] = 0x140002018
-        gen.mov_r64_imm64(Reg::RAX, 0x14000206C);
-        gen.call_mem64(Reg::RAX);
-
-        // Восстанавливаем стек
-        gen.add_r64_imm32(Reg::RSP, 32);
+        gen.call_iat_stub("puts");
+        // gen.mov_r64_imm64(Reg::RAX, 0x14000206C);
+        // gen.call_mem64(Reg::RAX);
       } break;
 
       default:

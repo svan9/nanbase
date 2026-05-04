@@ -8,7 +8,7 @@ namespace Virtual {
 #ifdef PLATFORM_WINDOWS
 
 inline void create_minimal_pe64(x86_64_CodeGen& cg, std::string filename) {
-  PE64Generator::CreateExecutable(cg.code, cg.data, filename);
+  PE64Generator::CreateExecutable(cg.code, cg.data, filename, &cg);
 }
 
 #else
