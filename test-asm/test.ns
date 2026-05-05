@@ -1,5 +1,5 @@
 import "hellow"
 
 entry:
-	jmp hellow
+	call __hellow
 	ret

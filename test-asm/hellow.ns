@@ -1,5 +1,6 @@
-data hellow "hellow, world!"
+data msg "hellow, world!"
 
-hellow: 
-	puts &hellow
+__hellow: 
+	puts &msg
+	pushn 0
 	ret

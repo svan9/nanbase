@@ -1604,6 +1604,7 @@ inline void VM_RS(VirtualMachine& vm) {
 void VM_ManualJmp(VirtualMachine& vm, u32 offset) {
   MewCriticalIf(!MEW_IN_RANGE(vm.memory, vm.end, vm.begin + offset),
                 "out of memory");
+  MewCriticalIf(offset == 0, "jmp offset = 0");
   vm.begin = vm.memory + offset;
   MewCriticalIf(vm.begin >= vm.end, "segmentation fault, cant call out of code");
 }
@@ -1612,6 +1613,8 @@ void VM_Jmp(VirtualMachine& vm) {
   vm.debug.last_fn = (char*)__func__;
   u64 offset;
   GrabFromVM(offset);
+  MewCriticalIf(offset == 0, "jmp offset = 0");
+  
   vm.begin = vm.memory + offset;
   MewCriticalIf(vm.begin >= vm.end, "segmentation fault, cant call out of code");
 }

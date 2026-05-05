@@ -13,6 +13,8 @@
 	"Flags:\n"\
 	"-rn -- run no output file"
 
+
+
 int main(int argc, char** argv) {
 	mew::args __args(argc, argv);
 	__args.normalize();
@@ -25,11 +27,17 @@ int main(int argc, char** argv) {
 		printf(HELP_PAGE); exit(0);
 	}
 
-
-	// flags.debug = __args.has("-d") || __args.has("--debug");
+#include "mewpack"
+struct _Flags {
+	bytepartf(RunOnly)
+	bytepartf(Debug)
+} _flags;
+#include "mewpop"
+	_flags.RunOnly = __args.has("-rn");
+	_flags.Debug = __args.has("-d") || __args.has("--debug");
 
 	const char* output_name = __args.getNextOr("-o", "./temp.nb");
-	// const char* input_name  = "D:/so2u/GITHUB/cuba/nan/nanbase/test-asm/test.ns";
+	// const char* input_name  = "D:/so2u/GITHUB/cuba/nan/nuna/nanbase/test-asm/test.ns";
 	const char* input_name  = __args.getNextPath();
 
 	if (!input_name) {
@@ -37,7 +45,7 @@ int main(int argc, char** argv) {
 	}
 
 	auto comp = nanasm::Compiler::compile(input_name);
-	if (__args.has("-rn")) {
+	if (_flags.RunOnly) {
 		Virtual::VirtualMachine vm;
 		Virtual::Code* code = *comp;
 		int exit_code = Virtual::Execute(vm, *code);
