@@ -5,12 +5,19 @@ Write assembly in `.ns` files, compile to `.nb` bytecode, run with the VM.
 
 ---
 ## Platform support
-
+### nanvm
 | Platform | Status |
 |---|---|
 | Windows | ✅ Tested |
 | Linux | ⚠️ Not tested |
 | macOS | ⚠️ Not tested |
+
+
+### waze-build
+| Platform | Status |
+|---|---|
+| Windows | ✅ Tested |
+| Linux | 🟥  Not Implement |
 ---
 
 ## Getting started
