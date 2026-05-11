@@ -1,0 +1,374 @@
+expand class std @nonpath
+
+type string = const? char*;
+
+trait numeric = int + float + double + char + boolean;
+template<T>
+trait printable_static = T::to_string() + T::toString();
+template<T>
+trait printable = printable_static<T> + T::{() -> string} + T::@string;
+type byte = unsigned char;
+trait unsigned = unsigned numeric;
+type bool = boolean;
+type str = const char*
+type i8 = char;
+type i16 = char * 2;
+type i32 = char * 4;
+type i64 = char * 8;
+type u8 = byte;
+type u16 = byte * 2;
+type u32 = byte * 4;
+type u64 = byte * 8;
+
+template<First, Second> 
+struct pair {
+	First first;
+	Second second;
+};
+
+extra pair {
+	@gen => #!default;
+	@gen => #!empty;
+	@copy => #!default;
+	@move => #!default;
+	operator => #!off;
+};
+
+template<T>
+`T new(u64 count) {
+	ret new(count * sizeof(T));
+}
+
+template<T>
+expand class stack
+
+struct {
+	First* data;
+	u64 size;
+	u64 capacity;
+}
+
+This&() @gen {
+	size = 0;
+	capacity = 8;
+	data = new<T>(capacity);
+}
+
+This&(u64 size) @gen {
+	size = 0;
+	capacity = size;
+	data = new<T>(capacity);
+}
+
+u64 normalize_index(i64 index) {
+	ret (size + index) % size;
+}
+
+***
+	transform argument 'index' with function 'normalize_index'
+	> from i64 to u64
+	u64 normalize_index(i64 index)
+	normalize_index(index) -> u64 index
+	same
+	i64 index
+***
+T& operator[](u64 normalize_index(i64 index)) {
+	if (index >= size) {
+		throw "Index out of range";
+	}
+	ret data[index];
+}
+
+Result<T&, err> operator[](u64 normalize_index(i64 index)) @safe {
+	if (index >= size) {
+		ret ERR("Index out of range");
+	}
+	ret OK(data[index]);
+}
+T& at(u64 normalize_index(i64 index)) {
+	if (index >= size) {
+		throw "Index out of range";
+	}
+	ret data[index];
+}
+
+Result<T&, err> at(u64 normalize_index(i64 index)) @safe {
+	if (index >= size) {
+		ret ERR("Index out of range");
+	}
+	ret OK(data[index]);
+}
+
+void erase(u64 normalize_index(i64 index)) {
+	if (index >= size) {
+		throw "Index out of range";
+	}
+	for (u64 i = index; i < size - 1; i++) {
+		data[i] = data[i + 1];
+	}
+	size--;
+}
+
+Result<, err> erase(u64 normalize_index(i64 index)) @safe {
+	if (index >= size) {
+		ret ERR("Index out of range");
+	}
+	for (u64 i = index; i < size - 1; i++) {
+		data[i] = data[i + 1];
+	}
+	size--;
+	ret OK();
+}
+
+void erase(u64 normalize_index(i64 start), u64 count) {
+	if (start >= size) {
+		throw "Index out of range";
+	}
+	if (start + count > size) {
+		count = size - start;
+	}
+	for (u64 i = start; i < size - count; i++) {
+		data[i] = data[i + count];
+	}
+	size -= count;
+}
+
+Result<, err> erase(u64 normalize_index(i64 start), u64 count) @safe {
+	if (start >= size) {
+		ret ERR("Index out of range");
+	}
+	if (start + count > size) {
+		count = size - start;
+	}
+	for (u64 i = start; i < size - count; i++) {
+		data[i] = data[i + count];
+	}
+	size -= count;
+	ret OK();
+}
+
+void push(T value) {
+	if (size == capacity) {
+		capacity *= 2;
+		data = new<T>(capacity);
+	}
+	data[size] = value;
+	size++;
+}
+
+Result<, err> push(T value) @safe {
+	if (size == capacity) {
+		capacity *= 2;
+		data = new<T>(capacity);
+	}
+	data[size] = value;
+	size++;
+	ret OK();
+}
+
+void pop() {
+	if (size == 0) {
+		throw "Stack is empty";
+	}
+	size--;
+}
+Result<, err> pop() @safe {
+	if (size == 0) {
+		ret ERR("Stack is empty");
+	}
+	size--;
+	ret OK();
+}
+
+T top() {
+	if (size == 0) {
+		throw "Stack is empty";
+	}
+	ret data[size - 1];
+}
+Result<T&, err> top() @safe {
+	if (size == 0) {
+		ret ERR("Stack is empty");
+	}
+	ret OK(data[size - 1]);
+}
+void clear() {
+	size = 0;
+}
+
+narrow class stack
+
+template<First, Second>
+expand class map
+
+struct {
+	stack<pair<First, Second>> data;
+};
+
+void insert(First key, Second value) @gen {
+	pair<First, Second> p;
+	p.first = key;
+	p.second = value;
+	data.push(p);
+}
+
+void insert(pair<First, Second>&& p) @gen {
+	data.push(p);
+}
+
+void erase(First key) @gen {
+	for (int i = 0; i < data.size(); i++) {
+		if (data[i].first == key) {
+			data.erase(i);
+			break;
+		}
+	}
+}
+
+Second& get(First key) @gen {
+	for (int i = 0; i < data.size(); i++) {
+		if (data[i].first == key) {
+			ret data[i].second;
+		}
+	}
+	ret null; // null can be a reference 
+}
+
+void clear() @gen {
+	data.clear();
+}
+
+expand class string
+
+struct {
+	u64 size;
+	str data;
+};
+
+This&() @gen {
+	size = 0;
+	data = null;
+}
+
+This&(str s) @gen {
+	size = strlen(s);
+	data = s;
+}
+
+This&(string s) @gen {
+	size = s.size;
+	data = s.data;
+}
+
+This&(string s, u64 size) @gen {
+	size = size;
+	data = s.data;
+}
+
+narrow class string
+
+expand class ops @nonpath
+
+// @autogen - template function generates with all includes types 
+// @nonpath - function globalied function
+// @right|@left - function-operator with prefix and suffix operator
+
+template<numeric T> important<1, 2>
+T operator+ (T a, T b) @nonpath @autogen {
+	ret bin{add $a $b};
+}
+template<numeric T> important<1, 2>
+T operator- (T a, T b) @nonpath @autogen {
+	ret bin{sub $a $b};
+}
+template<numeric T> important<3, 4>
+T operator/ (T a, T b) @nonpath @autogen {
+	ret bin{div $a $b};
+}
+template<numeric T> important<3, 4>
+T operator* (T a, T b) @nonpath @autogen {
+	ret bin{mul $a $b};
+}
+template<numeric T> important<1>
+T operator++ (T a) @nonpath @autogen {
+	ret bin{inc $a};
+}
+template<numeric T> important<2>
+T operator++ (T a) @nonpath @right @autogen {
+	T _tmp_a{a}; ++a;
+	ret _tmp_a;
+}
+template<numeric T> important<1>
+T operator-- (T a) @nonpath @autogen {
+	ret bin{dec $a};
+}
+template<numeric T> important<2>
+T operator-- (T a) @nonpath @right @autogen {
+	T _tmp_a{a}; --a;
+	ret _tmp_a;
+}
+template<numeric T> important<1, 2>
+bool operator>(T a, T b) @nonpath @autogen {
+	bin{test $a $b};
+	ret (bool)#vm::test::more;
+}
+template<numeric T> important<1, 2>
+bool operator<(T a, T b) @nonpath @autogen {
+	bin{test $a $b};
+	ret (bool)#vm::test::less;
+}
+template<numeric T> important<1, 2>
+bool operator==(T a, T b) @nonpath @autogen {
+	bin{test $a $b};
+	ret (bool)#vm::test::equal;
+}
+template<numeric T> important<1, 2> 
+bool operator>=(T a, T b) @nonpath @autogen {
+	bin{test $a $b};
+	ret (bool)#vm::test::equal | #vm::test::more;
+}
+template<numeric T> important<1, 2>
+bool operator<=(T a, T b) @nonpath @autogen {
+	bin{test $a $b};
+	ret (bool) #vm::test::equal | #vm::test::less;
+}
+template<numeric T> important<1, 2>
+T operator& (T a) @nonpath @autogen {
+	ret bin{and $a $b};
+}
+template<numeric T> important<1, 2>
+T operator| (T a) @nonpath @autogen {
+	ret bin{or $a $b};
+}
+template<numeric T> important<1, 2>
+T operator^ (T a) @nonpath @autogen {
+	ret bin{xor $a $b};
+}
+template<numeric T> important<1, 2>
+T operator~ (T a) @nonpath @autogen {
+	ret bin{not $a};
+}
+template<numeric T> important<1, 2>
+T operator<< (T a, T b) @nonpath @autogen {
+	ret bin{ls $a $b};
+}
+template<numeric T> important<1, 2>
+T operator>> (T a, T b) @nonpath @autogen {
+	ret bin{rs $a $b};
+}
+
+str [operator+, operator<<, operator..](str a, str b) @nonpath {
+	str buffer = new((strlen(a)+strlen(b))*sizeof(str)+1);
+	buffer << a;
+	buffer+strlen(a) << b;
+	buffer[-1] = 0;
+	ret buffer;
+}
+
+str operator>>(str a, str b) @nonpath {
+	return b << a;
+}
+
+narrow class ops
+
+narrow class std

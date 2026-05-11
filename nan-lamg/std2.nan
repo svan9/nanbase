@@ -1,0 +1,141 @@
+***
+struct __nan_uncompleted_types(__buildin__.signed_integer): __nan_types {
+	TypeReferenceKind reference = TypeReferenceKind::Integer;
+	NumberKind kind = NumberKind::Signed;
+	... = nullptr;
+}
+***
+
+type int = __buildin__.signed_integer + byte*4;
+
+
+// __buildin__.signed_integer - uncompleted type
+// type syntax
+// '*' - repeat type n times 
+// '+' - merge types
+// '-' - not implemented 
+// '/' - not implemented 
+type s64 = __buildin__.signed_integer + byte*8;
+type s32 = __buildin__.signed_integer + byte*4;
+type s16 = __buildin__.signed_integer + byte*2;
+type s8 = __buildin__.signed_integer + byte;
+
+type u64 = __buildin__.unsigned_integer + byte*8;
+type u32 = __buildin__.unsigned_integer + byte*4;
+type u16 = __buildin__.unsigned_integer + byte*2;
+type u8 = __buildin__.unsigned_integer + byte;
+
+// v1 
+int operator+ (int l, int r) @ignore_ret @prebuild {
+	// get variable offsets of stack
+	__buildin__.stack_offset sl = __buildin__.stack_offset_get(l);
+	__buildin__.stack_offset sr = __buildin__.stack_offset_get(r);
+	__buildin__.epilogue();
+	__buildin__.push(__buildin__.add__);
+	__buildin__.push(sl);
+	__buildin__.push(sr);
+	__buildin__.prologue();
+}
+// v2 - automatic
+int operator+ (int l, int r) {
+	ret bin{add $l, $r};
+}
+
+void putc(char c) {
+	__buildin__.epilogue();
+	__buildin__.push(__buildin__.putc__);
+	__buildin__.push(c);
+	__buildin__.prologue();
+}
+void puts(char `c) {
+	__buildin__.epilogue();
+	__buildin__.push(__buildin__.puts__);
+	__buildin__.push(c);
+	__buildin__.prologue();
+}
+
+u64 strlen(char` s) {
+	u64 c = 0;
+	while (s[c++] != 0) {}
+	ret c;
+}
+
+u64 memmove<T>(T` l, T` r) @ignore_ret {
+	__buildin__.epilogue();
+	__buildin__.push(__buildin__.memmove__);
+	__buildin__.push(l);
+	__buildin__.push(r);
+	__buildin__.prologue();
+}
+
+void free<T>(T` l) {
+	`l = null;
+	__buildin__.epilogue();
+	__buildin__.push(__buildin__.free__);
+	__buildin__.push(l);
+	__buildin__.prologue();
+}
+
+struct List<T> {
+	T `value;
+	u64 length;
+
+	This&(T `n, u64 l) @gen 
+		-- value(n)
+		-- length(l)
+		{} 
+
+	T& operator at(u64 idx) @list_getter {
+		ret value+(idx*sizeof(T));
+	}
+
+	void upsize() {
+		T` new_value = new<T>(length+1);
+		memmove<T>(new_value, value);
+		free<T>(value);
+		value = new_value;
+		++length;
+	}
+
+	void push(T& e) {
+		upsize();
+		value[length-1] = e; // copy to chunk
+	}
+};
+
+struct String {
+	List< char > value;
+	This&(char `n) @gen 
+		-- value(n, strlen(n)) 
+		{} 
+
+	This& operator +=(String s) {
+		
+	}
+}
+
+struct Args {
+	List<String> value;
+	This&() @gen {
+		auto ctx = __buildin__.ctx.current;
+		char `` argv = ctx.argv;
+		u64 argc = ctx.argc;
+		for (u64 i = 0; i < argc; ++i) {
+			String l = new String(argv[i]);
+			value.push(l);
+		}
+	}
+};
+
+// multi entry
+entry {
+	puts("entry 1")
+}
+
+entry {
+	puts("entry 2")
+}
+
+entry {
+	
+}

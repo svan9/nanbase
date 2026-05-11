@@ -1,0 +1,21 @@
+extern macros __buildin_expression;
+
+macros __buildin_etc 
+  $__buildin_expression:current ("," $__buildin_etc:nexts)?
+{
+	__buildin_macros_store current;
+	__buildin_macros_store nexts;
+}
+
+
+macros __buildin_squared_array 
+"(" $__buildin_etc:args ")"
+{
+	__buildin_macros_store args;
+}
+
+macros __buildin_function_call 
+"const"? name $__buildin_squared_array:args 
+{
+	__buildin_grab_global_storage 
+}

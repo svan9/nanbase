@@ -1,0 +1,38 @@
+expand class base;
+
+
+enum simple {
+	ONE, TWO, THREE
+};
+
+struct hard4enum {
+	int num, 
+	char* con;
+};
+
+enum hard: hard4enum {
+	ONE(1, "ONE"),
+	TWO(2, "TWO"),
+	THREE(3, "THREE"),
+};
+
+struct {
+	int a;
+	char* s;
+	hard4enum b;
+	simple c;
+};
+
+This&() @gen { } 
+
+int method1() {
+	ret b.num;
+}
+
+int function1() @static {
+	This local();
+	return (const)1;
+}
+
+
+narrow class base;
